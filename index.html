@@ -18,7 +18,8 @@
         background: black;
       }
       video,
-      canvas {
+      canvas,
+      img {
         max-width: 85vw;
       }
       #container {
@@ -33,22 +34,18 @@
       h1 {
         color: white;
         margin-bottom: 0;
-        padding-bottom: 0;
       }
-      button,
-      input[type="file"] {
+      button {
         margin-top: 23px;
-        padding-top: 0px;
         font-size: 18px;
-        align-items: center;
-        height: 28px;
-        width: 200px;
+        height: 38px;
+        width: 210px;
         background-color: black;
         border: 1px solid white;
         color: white;
         border-radius: 5px;
+        cursor: pointer;
       }
-
       .head {
         display: flex;
         flex-direction: row;
@@ -57,68 +54,97 @@
         gap: 20px;
         margin-bottom: 20px;
       }
-
-      #alertBox {
-        display: none;
-        background: red;
+      input[type="file"] {
+        appearance: none;
+        -webkit-appearance: none;
+        margin-top: 23px;
+        font-size: 18px;
+        height: 28px;
+        width: 210px;
+        background-color: black;
+        border: 1px solid white;
         color: white;
-        padding: 12px 20px;
-        font-size: 20px;
-        font-weight: 700;
-        position: fixed;
-        top: 10px;
-        left: 10px;
-        border-radius: 6px;
-        z-index: 9999;
-        box-shadow: 0 0 10px rgba(255, 0, 0, 0.7);
+        text-align: center;
+        padding: 5px 0;
+        border-radius: 5px;
+        cursor: pointer;
+      }
+      input[type="file"]::-webkit-file-upload-button {
+        visibility: hidden;
+      }
+      input[type="file"]::before {
+        content: "Upload File";
+        display: inline-block;
+        font-size: 18px;
+        color: white;
+        background: black;
+        width: 100%;
+        text-align: center;
+        cursor: pointer;
+      }
+      input[type="file"]:nth-of-type(1)::before {
+        content: "Upload Video";
+      }
+      input[type="file"]:nth-of-type(2)::before {
+        content: "Upload Image";
+      }
+      h2 {
+        color: white;
       }
     </style>
   </head>
 
   <body>
-    <div id="alertBox"></div>
-
     <div class="head">
-      <h1>Fire & Landslide Detection</h1>
+      <h1>Disaster Detection</h1>
       <button onclick="startWebcam()">Use Webcam</button>
       <input type="file" accept="video/*" onchange="loadVideo(event)" />
+      <input type="file" accept="image/*" onchange="loadImage(event)" />
     </div>
+
+    <h2 id="counterText">
+      Log Counter (Fire: 0🔥 Smoke: 0🚬 Person: 0🧔 Drowning: 0💧 Landslide:
+      0❌)
+    </h2>
 
     <div id="container">
       <video id="video" autoplay muted playsinline></video>
+      <img id="uploadedImage" style="display: none" />
       <canvas id="overlay"></canvas>
     </div>
   </body>
 
   <script>
-    const FIRE_API_KEY = "wc7Qma2sHvvRwnzqywCq";
-    const FIRE_API_URL =
-      "https://serverless.roboflow.com/fire_detection-uhbdr/3";
-
-    const LANDSLIDE_API_KEY = "wc7Qma2sHvvRwnzqywCq";
-    const LANDSLIDE_API_URL =
-      "https://serverless.roboflow.com/landslide_segmentation-vhobb/3";
+    const API_KEY = "8Mo9AvTEN1lIfRiLfdkF";
+    const API_URL =
+      "https://serverless.roboflow.com/disasterdetection2-wyfhe/2";
 
     const video = document.getElementById("video");
+    const img = document.getElementById("uploadedImage");
     const canvas = document.getElementById("overlay");
     const ctx = canvas.getContext("2d");
-    const alertBox = document.getElementById("alertBox");
 
     let running = false;
-    let alertActive = false; 
 
-    function showAlert(message) {
-      if (alertActive) return;
+    let counter = {
+      fire: 0,
+      smoke: 0,
+      person: 0,
+      drowning: 0,
+      landslide: 0,
+    };
 
-      alertActive = true;
-      alertBox.innerText = message;
-      alertBox.style.display = "block";
+    function updateCounterDisplay() {
+      document.getElementById(
+        "counterText"
+      ).innerText = `Log Counter (Fire: ${counter.fire}🔥  Smoke: ${counter.smoke}🚬  Person: ${counter.person}🧔  Drowning: ${counter.drowning}💧  Landslide: ${counter.landslide}⚠)`;
     }
 
     async function startWebcam() {
+      img.style.display = "none";
+      video.style.display = "block";
       const stream = await navigator.mediaDevices.getUserMedia({ video: true });
       video.srcObject = stream;
-
       video.onloadedmetadata = () => {
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
@@ -128,100 +154,102 @@
     }
 
     function loadVideo(e) {
+      img.style.display = "none";
+      video.style.display = "block";
+      running = true;
       const file = e.target.files[0];
       if (!file) return;
-
       video.src = URL.createObjectURL(file);
       video.loop = true;
-
       video.onloadedmetadata = () => {
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
-        running = true;
         detectFrame();
       };
     }
+
+    function loadImage(e) {
+      running = false;
+      video.style.display = "none";
+      img.style.display = "block";
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        img.src = reader.result;
+        img.onload = () => {
+          canvas.width = img.width;
+          canvas.height = img.height;
+          detectOnCanvas(img);
+        };
+      };
+      reader.readAsDataURL(file);
+    }
+
     async function detectFrame() {
       if (!running) return;
-
       if (video.paused || video.ended) {
         requestAnimationFrame(detectFrame);
         return;
       }
-
-      const temp = document.createElement("canvas");
-      temp.width = video.videoWidth;
-      temp.height = video.videoHeight;
-
-      const tctx = temp.getContext("2d");
-      tctx.drawImage(video, 0, 0, temp.width, temp.height);
-
-      const base64 = temp.toDataURL("image/jpeg").split(",")[1];
-
-      try {
-        const [fireData, landslideData] = await Promise.all([
-          detectFire(base64),
-          detectLandslide(base64),
-        ]);
-
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        drawBoxes(fireData, "fire");
-        drawBoxes(landslideData, "landslide");
-      } catch (err) {
-        console.log("Detection Error:", err);
-      }
-
+      detectOnCanvas(video);
       setTimeout(() => requestAnimationFrame(detectFrame), 200);
     }
 
-    async function detectFire(image) {
-      const response = await fetch(`${FIRE_API_URL}?api_key=${FIRE_API_KEY}`, {
+    async function detectOnCanvas(source) {
+      const temp = document.createElement("canvas");
+      temp.width = source.width || source.videoWidth;
+      temp.height = source.height || source.videoHeight;
+      const tctx = temp.getContext("2d");
+      tctx.drawImage(source, 0, 0, temp.width, temp.height);
+      const base64 = temp.toDataURL("image/jpeg").split(",")[1];
+      try {
+        const data = await detectDisaster(base64);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        drawBoxes(data);
+      } catch (err) {
+        console.log("Detection Error:", err);
+      }
+    }
+
+    async function detectDisaster(image) {
+      const response = await fetch(`${API_URL}?api_key=${API_KEY}`, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: image,
       });
-
-      const data = await response.json();
-
-      if (data.predictions?.length > 0) {
-        showAlert("🔥 Fire Detected");
-      }
-
-      return data;
+      return await response.json();
     }
 
-    async function detectLandslide(image) {
-      const response = await fetch(
-        `${LANDSLIDE_API_URL}?api_key=${LANDSLIDE_API_KEY}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: image,
-        }
-      );
-
-      const data = await response.json();
-
-      if (data.predictions?.length > 0) {
-        showAlert("⛰️ Landslide Detected");
-      }
-
-      return data;
-    }
-
-    function drawBoxes(data, type) {
+    function drawBoxes(data) {
       if (!data.predictions) return;
 
       data.predictions.forEach((p) => {
+        if (p.class === "fire") counter.fire++;
+        if (p.class === "smoke" && p.confidence >= 0.9) counter.smoke++;
+        if (p.class === "person") counter.person++;
+        if (p.class === "drowning") counter.drowning++;
+        if (p.class === "landslide") counter.landslide++;
+      });
+
+      updateCounterDisplay();
+
+      data.predictions.forEach((p) => {
+        if (p.class === "smoke" && p.confidence < 0.9) return;
+
         const x = p.x - p.width / 2;
         const y = p.y - p.height / 2;
 
-        ctx.strokeStyle = type === "fire" ? "red" : "blue";
+        let color = "#ffff00";
+        if (p.class === "person") color = "#6d80fa";
+        if (p.class === "fire") color = "#ff0000";
+        if (p.class === "smoke") color = "#8a8a8a";
+
+        ctx.strokeStyle = color;
         ctx.lineWidth = 3;
         ctx.strokeRect(x, y, p.width, p.height);
 
-        ctx.fillStyle = type === "fire" ? "red" : "blue";
+        ctx.fillStyle = color;
         ctx.font = "20px Arial";
         ctx.fillText(
           `${p.class} (${(p.confidence * 100).toFixed(1)}%)`,
